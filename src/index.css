@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-royal-50: #f2f7f5;
+  --color-royal-100: #e1efe8;
+  --color-royal-200: #c5dfd3;
+  --color-royal-300: #9bc6b5;
+  --color-royal-400: #6ca692;
+  --color-royal-500: #498974;
+  --color-royal-600: #366d5b;
+  --color-royal-700: #2c584b;
+  --color-royal-800: #25473e;
+  --color-royal-900: #1f3b34;
+  --color-royal-950: #0f211c;
+}
+
+@layer base {
+  html {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-[#fcfcfc] text-[#111111];
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-md border border-white/20 shadow-[0_4px_24px_rgba(0,0,0,0.02)];
+  }
+  .subtle-shadow {
+    @apply shadow-[0_2px_8px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.02)];
+  }
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal-900 focus-visible:ring-offset-2;
+  }
+}

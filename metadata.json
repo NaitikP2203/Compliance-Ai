@@ -1,0 +1,8 @@
+{
+  "name": "Compliance AI",
+  "description": "Enterprise-grade compliance management, risk analysis, and reporting platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
