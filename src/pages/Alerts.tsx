@@ -1,27 +1,72 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ShieldAlert, AlertTriangle, Clock, CheckCircle2, MoreVertical, Search, Filter } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Clock, CheckCircle2, Search, Filter, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { supabase } from '@/lib/supabase';
 
 export default function Alerts() {
   const [activeTab, setActiveTab] = useState('open');
-  const [alerts, setAlerts] = useState([
-    { id: '1', title: 'Critical KYC Missing', entity: 'Vanguard Holdings', time: '10 mins ago', type: 'urgent', status: 'open' },
-    { id: '2', title: 'Suspicious Transaction Pattern', entity: 'Entity A', time: '2 hours ago', type: 'warning', status: 'open' },
-    { id: '3', title: 'Business License Expired', entity: 'Global Tech', time: '5 hours ago', type: 'warning', status: 'open' },
-    { id: '4', title: 'Multiple Failed Logins', entity: 'Admin User', time: '1 day ago', type: 'urgent', status: 'resolved' },
-    { id: '5', title: 'Unusual Geographical Access', entity: 'Acme Corp', time: '1 day ago', type: 'warning', status: 'resolved' },
-  ]);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleResolve = (id: string) => {
-    toast.success('Alert marked as resolved', {
-      description: 'The security log has been updated.',
-    });
-    setAlerts(alerts.map(a => a.id === id ? { ...a, status: 'resolved' } : a));
+  const fetchAlerts = async () => {
+    try {
+      setLoading(true);
+      // Fetch documents that have issues (pending or rejected)
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*, businesses(name)')
+        .in('status', ['pending', 'rejected'])
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      // Transform into alert format
+      const transformedAlerts = ((data as any[]) || []).map((doc: any) => ({
+        id: doc.id,
+        title: doc.status === 'rejected' ? 'Security Audit Failed' : 'Document Pending Verification',
+        entity: doc.businesses?.name || 'Global',
+        time: new Date(doc.created_at).toLocaleDateString(),
+        type: doc.status === 'rejected' ? 'urgent' : 'warning',
+        status: 'open',
+        doc_id: doc.id
+      }));
+
+      setAlerts(transformedAlerts);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to fetch alerts');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAlerts();
+  }, []);
+
+  const handleResolve = async (id: string, docId: string) => {
+    try {
+      // Optimistic update
+      setAlerts(alerts.map(a => a.id === id ? { ...a, status: 'resolved' } : a));
+      
+      const { error } = await (supabase
+        .from('documents') as any)
+        .update({ status: 'verified' })
+        .eq('id', docId);
+
+      if (error) throw error;
+
+      toast.success('Alert resolved', {
+        description: 'Document has been manually verified.',
+      });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to resolve alert');
+      fetchAlerts(); // rollback
+    }
   };
 
   const handleMarkAllRead = () => {
@@ -45,46 +90,46 @@ export default function Alerts() {
   };
 
   return (
-    <div className="space-y-6 max-w-[1200px] mx-auto">
+    <div className="space-y-6 max-w-[1200px] mx-auto font-sans">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-[#111111]">Security Alerts</h2>
-          <p className="text-sm text-[#666666] mt-1">Real-time monitoring and policy violation alerts.</p>
+          <h2 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Security Alerts</h2>
+          <p className="text-sm text-[var(--muted-foreground)] mt-1">Real-time monitoring and policy violation alerts.</p>
         </div>
         <div className="flex gap-3 w-full sm:w-auto">
-          <Button variant="outline" className="shadow-sm h-10 flex-1 sm:flex-none bg-white" onClick={handleMarkAllRead}>
+          <Button variant="outline" className="shadow-sm h-9 flex-1 sm:flex-none bg-[var(--card)] border-[var(--border)] text-xs font-medium" onClick={handleMarkAllRead}>
             Mark All as Read
           </Button>
-          <Button variant="royal" className="shadow-sm h-10 flex-1 sm:flex-none">
+          <Button className="shadow-sm h-9 flex-1 sm:flex-none bg-[var(--foreground)] text-[var(--background)] hover:bg-[var(--foreground)]/90 text-xs font-medium">
             <Filter className="mr-2 h-4 w-4" />
             Filter Rules
           </Button>
         </div>
       </div>
 
-      <div className="flex gap-6 border-b border-[#eaeaea]">
+      <div className="flex gap-6 border-b border-[var(--border)]">
         <button 
           onClick={() => setActiveTab('open')}
           className={cn(
             "pb-3 font-semibold text-sm transition-colors relative",
-            activeTab === 'open' ? "text-[#111111]" : "text-[#888888] hover:text-[#111111]"
+            activeTab === 'open' ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           )}
         >
           Action Required ({alerts.filter(a => a.status === 'open').length})
           {activeTab === 'open' && (
-            <motion.div layoutId="alertTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#111111]" />
+            <motion.div layoutId="alertTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--foreground)]" />
           )}
         </button>
         <button 
           onClick={() => setActiveTab('resolved')}
           className={cn(
             "pb-3 font-semibold text-sm transition-colors relative",
-            activeTab === 'resolved' ? "text-[#111111]" : "text-[#888888] hover:text-[#111111]"
+            activeTab === 'resolved' ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           )}
         >
           Resolved Incidents ({alerts.filter(a => a.status === 'resolved').length})
           {activeTab === 'resolved' && (
-            <motion.div layoutId="alertTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#111111]" />
+            <motion.div layoutId="alertTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--foreground)]" />
           )}
         </button>
       </div>
@@ -96,7 +141,12 @@ export default function Alerts() {
         className="space-y-4"
       >
         <AnimatePresence mode="popLayout">
-          {filteredAlerts.length === 0 ? (
+          {loading ? (
+            <motion.div variants={item} initial="hidden" animate="show" exit="exit" className="p-24 flex flex-col items-center justify-center text-[var(--muted-foreground)]">
+              <Loader2 className="h-8 w-8 animate-spin mb-4" />
+              <p className="text-sm font-medium">Loading alerts...</p>
+            </motion.div>
+          ) : filteredAlerts.length === 0 ? (
             <motion.div variants={item} initial="hidden" animate="show" exit="exit">
               <EmptyState 
                 icon={CheckCircle2}
@@ -109,8 +159,8 @@ export default function Alerts() {
             filteredAlerts.map((alert) => (
               <motion.div variants={item} key={alert.id} layoutId={`alert-${alert.id}`}>
                 <Card className={cn(
-                  "border-[#eaeaea] shadow-sm transition-all overflow-hidden group",
-                  alert.status === 'resolved' ? "bg-[#fafafa]" : "hover:border-royal-200 bg-white"
+                  "border-[var(--border)] shadow-sm transition-all overflow-hidden group",
+                  alert.status === 'resolved' ? "bg-[var(--muted)]/50" : "hover:border-[var(--foreground)] bg-[var(--card)]"
                 )}>
                   <CardContent className="p-0">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center p-5 gap-5 relative">
@@ -119,9 +169,9 @@ export default function Alerts() {
                       )}
                       
                       <div className={cn(
-                        "p-3 rounded-xl flex-shrink-0",
-                        alert.status === 'resolved' ? "bg-emerald-50 text-emerald-600" :
-                        alert.type === 'urgent' ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"
+                        "p-3 rounded-xl flex-shrink-0 border",
+                        alert.status === 'resolved' ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" :
+                        alert.type === 'urgent' ? "bg-red-500/10 text-red-600 border-red-500/20" : "bg-amber-500/10 text-amber-600 border-amber-500/20"
                       )}>
                         {alert.status === 'resolved' ? (
                           <CheckCircle2 className="h-6 w-6" />
@@ -136,31 +186,31 @@ export default function Alerts() {
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
                           <h3 className={cn(
                             "font-bold text-[15px]",
-                            alert.status === 'resolved' ? "text-[#666666] line-through decoration-[#cccccc]" : "text-[#111111]"
+                            alert.status === 'resolved' ? "text-[var(--muted-foreground)] line-through decoration-[var(--border)]" : "text-[var(--foreground)]"
                           )}>{alert.title}</h3>
-                          <span className="text-xs font-medium text-[#888888] flex items-center bg-[#f5f5f5] px-2 py-1 rounded-md w-fit">
+                          <span className="text-xs font-medium text-[var(--muted-foreground)] flex items-center bg-[var(--muted)] border border-[var(--border)] px-2 py-1 rounded-md w-fit">
                             <Clock className="mr-1.5 h-3 w-3" />
                             {alert.time}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-[#666666]">Affected Entity:</span>
-                          <span className="text-sm font-semibold text-[#111111] bg-[#fafafa] border border-[#eaeaea] px-2 py-0.5 rounded">{alert.entity}</span>
+                          <span className="text-sm text-[var(--muted-foreground)]">Affected Entity:</span>
+                          <span className="text-sm font-semibold text-[var(--foreground)] bg-[var(--muted)] border border-[var(--border)] px-2 py-0.5 rounded">{alert.entity}</span>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
                         {alert.status === 'open' ? (
                           <>
-                            <Button variant="outline" size="sm" className="h-9 flex-1 sm:flex-none bg-white">
+                            <Button variant="outline" size="sm" className="h-9 flex-1 sm:flex-none bg-[var(--card)] border-[var(--border)] text-xs font-medium">
                               Details
                             </Button>
-                            <Button variant="default" size="sm" className="h-9 flex-1 sm:flex-none bg-[#111111] hover:bg-[#222222]" onClick={() => handleResolve(alert.id)}>
+                            <Button variant="default" size="sm" className="h-9 flex-1 sm:flex-none bg-[var(--foreground)] text-[var(--background)] hover:bg-[var(--foreground)]/90 text-xs font-medium" onClick={() => handleResolve(alert.id, alert.doc_id)}>
                               Resolve
                             </Button>
                           </>
                         ) : (
-                          <Button variant="ghost" size="sm" className="text-[#666666] hover:text-[#111111]">
+                          <Button variant="ghost" size="sm" className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] text-xs font-medium">
                             View Audit Log
                           </Button>
                         )}

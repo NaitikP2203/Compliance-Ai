@@ -1,52 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Plus, Filter, MoreHorizontal, ArrowUpDown, CheckCircle2, Clock, AlertCircle, Building2, ChevronDown } from 'lucide-react';
+import { Search, Plus, Filter, MoreHorizontal, ArrowUpDown, CheckCircle2, Clock, AlertCircle, Building2, ChevronDown, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Business } from '@/types';
-
-const INITIAL_BUSINESSES: Business[] = [
-  { id: '1', name: 'Acme Corp', gstin: '22AAAAA0000A1Z5', status: 'compliant', risk: 'Low', industry: 'Financial Services', complianceScore: 98, lastUpdated: 'Today' },
-  { id: '2', name: 'Global Tech', gstin: '27AABCV1234F1Z0', status: 'review', risk: 'Medium', industry: 'Technology', complianceScore: 75, lastUpdated: 'Yesterday' },
-  { id: '3', name: 'Vanguard Holdings', gstin: '29ABCDE1234F2Z5', status: 'action_required', risk: 'High', industry: 'Real Estate', complianceScore: 42, lastUpdated: '2 days ago' },
-  { id: '4', name: 'Apex Innovations', gstin: 'INVALID_GSTIN', status: 'compliant', risk: 'Low', industry: 'Healthcare', complianceScore: 91, lastUpdated: 'Last week' },
-  { id: '5', name: 'Stark Industries', gstin: '24AAAAA0000A1Z5', status: 'review', risk: 'Critical', industry: 'Defense', complianceScore: 28, lastUpdated: '1 month ago' },
-];
+import { supabase } from '@/lib/supabase';
+import { AddBusinessModal } from '@/components/AddBusinessModal';
 
 export default function Businesses() {
-  const [businesses, setBusinesses] = useState<Business[]>(INITIAL_BUSINESSES);
+  const [businesses, setBusinesses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const fetchBusinesses = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.from('businesses').select('*');
+      if (error) throw error;
+      setBusinesses(data || []);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to fetch businesses');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBusinesses();
+  }, []);
 
   const validateGSTIN = (gstin: string) => {
+    if (!gstin) return false;
     const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
     return gstinRegex.test(gstin);
   };
 
   const handleAdd = () => {
-    toast.success('Business creation workflow initialized');
+    setIsModalOpen(true);
   };
 
   const filteredBusinesses = businesses.filter(b => 
-    b.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    b.gstin.toLowerCase().includes(searchQuery.toLowerCase())
+    b.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    b.gstin?.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const getStatusConfig = (status: string) => {
-    switch(status) {
-      case 'compliant':
-        return { label: 'Compliant', icon: CheckCircle2, className: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
-      case 'review':
-        return { label: 'Under Review', icon: Clock, className: 'text-amber-700 bg-amber-50 border-amber-200' };
-      case 'action_required':
-        return { label: 'Action Required', icon: AlertCircle, className: 'text-red-700 bg-red-50 border-red-200' };
-      default:
-        return { label: 'Unknown', icon: Clock, className: 'text-gray-700 bg-gray-50 border-gray-200' };
-    }
-  };
 
   const container = {
     hidden: { opacity: 0 },
@@ -62,146 +62,144 @@ export default function Businesses() {
   };
 
   return (
-    <div className="space-y-6 max-w-[1400px] mx-auto">
+    <div className="space-y-6 max-w-[1400px] mx-auto font-sans">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-[#111111]">Entity Directory</h2>
-          <p className="text-sm text-[#666666] mt-1">Manage registered entities, monitor compliance status, and perform due diligence.</p>
+          <h2 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Entity Directory</h2>
+          <p className="text-sm text-[var(--muted-foreground)] mt-1">Manage registered entities and monitor compliance status.</p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" className="shadow-sm h-10">
+          <Button variant="outline" className="shadow-sm h-9 border-[var(--border)] text-xs font-medium">
             Export Data
           </Button>
-          <Button variant="royal" className="shadow-sm h-10" onClick={handleAdd}>
+          <Button id="add-business-button" className="shadow-sm h-9 bg-[var(--foreground)] text-[var(--background)] hover:bg-[var(--foreground)]/90 text-xs font-medium" onClick={handleAdd}>
             <Plus className="mr-2 h-4 w-4" />
-            Add Entity
+            Add Business
           </Button>
         </div>
       </div>
 
-      <Card className="overflow-hidden border-[#eaeaea] shadow-sm">
-        <div className="p-4 border-b border-[#eaeaea] bg-white flex flex-col sm:flex-row gap-3 justify-between items-center">
+      <Card className="overflow-hidden border-[var(--border)] bg-[var(--card)] shadow-sm">
+        <div className="p-4 border-b border-[var(--border)] flex flex-col sm:flex-row gap-3 justify-between items-center">
           <div className="relative w-full sm:max-w-md flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#888888]" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--muted-foreground)]" />
             <Input 
               placeholder="Search by entity name or GSTIN..." 
-              className="pl-9 h-10 bg-[#fafafa] border-[#eaeaea] focus-visible:ring-royal-500"
+              className="pl-9 h-10 bg-[var(--muted)] border-transparent focus-visible:ring-1 focus-visible:ring-[var(--foreground)]"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
           <div className="flex gap-2 w-full sm:w-auto">
-            <Button variant="outline" size="sm" className="h-10 px-4 whitespace-nowrap bg-[#fafafa] hover:bg-[#f0f0f0]">
+            <Button variant="outline" size="sm" className="h-10 px-4 whitespace-nowrap bg-[var(--card)] hover:bg-[var(--muted)] border-[var(--border)]">
               <Filter className="mr-2 h-4 w-4" />
               All Statuses
-              <ChevronDown className="ml-2 h-3 w-3 text-[#888888]" />
+              <ChevronDown className="ml-2 h-3 w-3 text-[var(--muted-foreground)]" />
             </Button>
           </div>
         </div>
         
-        {filteredBusinesses.length === 0 ? (
-          <EmptyState 
-            icon={Building2}
-            title="No entities found"
-            description="We couldn't find any entities matching your search criteria. Try adjusting your filters or search term."
-            actionLabel="Clear Search"
-            onAction={() => setSearchQuery('')}
-            className="border-0 rounded-none m-4"
-          />
+        {loading ? (
+          <div className="p-24 flex flex-col items-center justify-center text-[var(--muted-foreground)]">
+            <Loader2 className="h-8 w-8 animate-spin mb-4" />
+            <p className="text-sm font-medium">Loading entities...</p>
+          </div>
+        ) : filteredBusinesses.length === 0 ? (
+          <div className="p-16 text-center">
+            <div className="mx-auto bg-[var(--muted)] w-16 h-16 rounded-full flex items-center justify-center text-[var(--muted-foreground)] mb-6">
+              <Building2 className="h-8 w-8" />
+            </div>
+            <h3 className="text-lg font-bold text-[var(--foreground)] mb-2">No entities found</h3>
+            <p className="text-sm text-[var(--muted-foreground)] mb-6 max-w-sm mx-auto">
+              {businesses.length === 0 
+                ? "You haven't added any entities to the directory yet." 
+                : "No entities matched your search criteria."}
+            </p>
+            {businesses.length > 0 && (
+              <Button variant="outline" onClick={() => setSearchQuery('')}>
+                Clear Search
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-[#fafafa] border-b border-[#eaeaea] text-[#666666]">
+              <thead className="bg-[var(--muted)]/50 border-b border-[var(--border)] text-[var(--muted-foreground)]">
                 <tr>
-                  <th className="px-6 py-4 font-medium cursor-pointer hover:text-[#111111] transition-colors">
-                    <div className="flex items-center gap-2">Entity Name <ArrowUpDown className="h-3 w-3" /></div>
-                  </th>
-                  <th className="px-6 py-4 font-medium">Identifier (GSTIN)</th>
-                  <th className="px-6 py-4 font-medium">Industry</th>
-                  <th className="px-6 py-4 font-medium">Health Score</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium cursor-pointer hover:text-[#111111] transition-colors">
-                    <div className="flex items-center gap-2">Risk Level <ArrowUpDown className="h-3 w-3" /></div>
-                  </th>
-                  <th className="px-6 py-4 font-medium text-right">Actions</th>
+                  <th className="px-6 py-4 font-semibold text-xs tracking-wider uppercase">Entity Name</th>
+                  <th className="px-6 py-4 font-semibold text-xs tracking-wider uppercase">Identifier (GSTIN)</th>
+                  <th className="px-6 py-4 font-semibold text-xs tracking-wider uppercase">Industry</th>
+                  <th className="px-6 py-4 font-semibold text-xs tracking-wider uppercase">Health Score</th>
+                  <th className="px-6 py-4 font-semibold text-xs tracking-wider uppercase">Risk Level</th>
+                  <th className="px-6 py-4 font-semibold text-xs tracking-wider uppercase text-right">Actions</th>
                 </tr>
               </thead>
               <motion.tbody 
                 variants={container}
                 initial="hidden"
                 animate="show"
-                className="divide-y divide-[#eaeaea] bg-white"
+                className="divide-y divide-[var(--border)]"
               >
                 {filteredBusinesses.map((row) => {
-                  const status = getStatusConfig(row.status);
+                  const complianceScore = 100 - (row.risk_score || 0);
                   return (
-                    <motion.tr variants={item} key={row.id} className="hover:bg-[#fafafa]/80 transition-colors group">
+                    <motion.tr variants={item} key={row.id} className="hover:bg-[var(--muted)]/50 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-royal-50 flex items-center justify-center text-royal-700 font-semibold border border-royal-100">
-                            {row.name.substring(0, 2).toUpperCase()}
+                          <div className="h-8 w-8 rounded bg-[var(--muted)] flex items-center justify-center text-[var(--foreground)] font-semibold border border-[var(--border)] text-xs">
+                            {row.name ? row.name.substring(0, 2).toUpperCase() : 'EN'}
                           </div>
                           <div>
-                            <p className="font-medium text-[#111111]">{row.name}</p>
-                            <p className="text-[11px] text-[#888888] mt-0.5">Updated {row.lastUpdated}</p>
+                            <p className="font-semibold text-[var(--foreground)]">{row.name}</p>
+                            <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5">ID: {row.id.substring(0, 8)}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-mono text-xs text-[#666666]">
+                      <td className="px-6 py-4 font-mono text-xs text-[var(--muted-foreground)]">
                         <div className="flex items-center gap-2">
-                          {row.gstin}
+                          {row.gstin || 'N/A'}
                           {validateGSTIN(row.gstin) ? (
-                            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-emerald-100 text-emerald-600" title="Valid Format">
+                            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-emerald-500/10 text-emerald-600">
                               <CheckCircle2 className="h-3 w-3" />
                             </span>
-                          ) : (
-                            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-red-100 text-red-600" title="Invalid Format">
+                          ) : row.gstin ? (
+                            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-red-500/10 text-red-600">
                               <AlertCircle className="h-3 w-3" />
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-[#666666]">{row.industry}</td>
+                      <td className="px-6 py-4 text-[var(--muted-foreground)]">{row.industry || 'Unknown'}</td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 w-16 bg-[#eaeaea] rounded-full overflow-hidden">
+                          <div className="flex-1 h-1.5 w-16 bg-[var(--muted)] rounded-full overflow-hidden">
                             <div 
                               className={cn("h-full rounded-full", 
-                                (row.complianceScore || 0) >= 90 ? "bg-emerald-500" :
-                                (row.complianceScore || 0) >= 70 ? "bg-amber-500" : "bg-red-500"
+                                complianceScore >= 90 ? "bg-emerald-500" :
+                                complianceScore >= 70 ? "bg-amber-500" : "bg-red-500"
                               )} 
-                              style={{ width: `${row.complianceScore}%` }} 
+                              style={{ width: `${complianceScore}%` }} 
                             />
                           </div>
-                          <span className="text-xs font-medium text-[#444444]">{row.complianceScore}%</span>
+                          <span className="text-xs font-semibold text-[var(--foreground)]">{complianceScore}%</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className={cn(
-                          "inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold border uppercase tracking-wider",
-                          status.className
-                        )}>
-                          {status.label}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={cn(
-                          "font-medium text-sm flex items-center gap-1.5",
-                          row.risk === 'Low' ? 'text-emerald-600' :
-                          row.risk === 'Medium' ? 'text-amber-600' : 
-                          row.risk === 'High' ? 'text-orange-600' : 'text-red-600'
+                          "font-semibold text-xs flex items-center gap-1.5",
+                          row.risk_score < 40 ? 'text-emerald-600' :
+                          row.risk_score < 80 ? 'text-amber-600' : 'text-red-600'
                         )}>
                           <div className={cn(
                             "h-2 w-2 rounded-full",
-                            row.risk === 'Low' ? 'bg-emerald-500' :
-                            row.risk === 'Medium' ? 'bg-amber-500' : 
-                            row.risk === 'High' ? 'bg-orange-500' : 'bg-red-500'
+                            row.risk_score < 40 ? 'bg-emerald-500' :
+                            row.risk_score < 80 ? 'bg-amber-500' : 'bg-red-500'
                           )} />
-                          {row.risk}
+                          {row.risk_score < 40 ? 'Minimal' : row.risk_score < 80 ? 'Elevated' : 'Critical'}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-[#888888] hover:text-[#111111] opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-[var(--muted-foreground)] hover:text-[var(--foreground)] opacity-0 group-hover:opacity-100 transition-opacity">
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </td>
@@ -214,18 +212,22 @@ export default function Businesses() {
         )}
         
         {filteredBusinesses.length > 0 && (
-          <div className="p-4 border-t border-[#eaeaea] bg-[#fafafa] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#666666]">
-            <span>Showing <span className="font-medium text-[#111111]">{filteredBusinesses.length}</span> of <span className="font-medium text-[#111111]">{businesses.length}</span> entities</span>
+          <div className="p-4 border-t border-[var(--border)] bg-[var(--muted)]/30 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--muted-foreground)]">
+            <span>Showing <span className="font-semibold text-[var(--foreground)]">{filteredBusinesses.length}</span> of <span className="font-semibold text-[var(--foreground)]">{businesses.length}</span> entities</span>
             <div className="flex gap-1">
-              <Button variant="outline" size="sm" className="h-8 text-xs bg-white" disabled>Previous</Button>
-              <Button variant="outline" size="sm" className="h-8 text-xs bg-white bg-royal-50 text-royal-700 border-royal-200">1</Button>
-              <Button variant="outline" size="sm" className="h-8 text-xs bg-white">2</Button>
-              <Button variant="outline" size="sm" className="h-8 text-xs bg-white">3</Button>
-              <Button variant="outline" size="sm" className="h-8 text-xs bg-white">Next</Button>
+              <Button variant="outline" size="sm" className="h-8 text-xs bg-[var(--card)] border-[var(--border)]" disabled>Previous</Button>
+              <Button variant="outline" size="sm" className="h-8 text-xs bg-[var(--foreground)] text-[var(--background)] border-transparent">1</Button>
+              <Button variant="outline" size="sm" className="h-8 text-xs bg-[var(--card)] border-[var(--border)]">Next</Button>
             </div>
           </div>
         )}
       </Card>
+
+      <AddBusinessModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSuccess={fetchBusinesses} 
+      />
     </div>
   );
 }

@@ -98,7 +98,7 @@ export const useSecurityStore = create<SecurityState>()(
   persist(
     (set, get) => ({
       currentRole: 'admin', // Default to admin so preview acts fully, but user can change it
-      currentEmail: 'admin@enterprise.com',
+      currentEmail: null,
       isStrictCSPEnabled: true,
       isFileScanEnabled: true,
       isRateLimitingEnabled: true,

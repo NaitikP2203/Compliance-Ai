@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ShieldAlert, ArrowRight, RefreshCw, Key, AlertTriangle, Eye, EyeOff } from 'lucide-react';
+import { ShieldAlert, ArrowRight, Key, AlertTriangle, Eye, EyeOff, Loader2, Check } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/constants';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,6 +13,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
   
@@ -27,7 +27,16 @@ export default function Login() {
   
   const [lockoutState, setLockoutState] = useState(checkLockout(email));
 
-  // Lockout tick effect
+  // Load remembered email on startup
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('remember_me_email');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
+
+  // Lockout check interval tick
   useEffect(() => {
     const interval = setInterval(() => {
       const currentStatus = checkLockout(email);
@@ -36,24 +45,22 @@ export default function Login() {
     return () => clearInterval(interval);
   }, [email, checkLockout]);
 
-  // Client-side Input Validation (ASVS-compliant)
+  // Client-side Input Validation
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
-    
-    // Email sanitization and structure verification
     const emailTrimmed = email.trim();
+    
     if (!emailTrimmed) {
       newErrors.email = 'Email address is required.';
     } else {
       const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
       if (!emailRegex.test(emailTrimmed)) {
-        newErrors.email = 'Please provide a syntactically valid email format.';
+        newErrors.email = 'Please enter a valid email address.';
       }
     }
 
-    // Password validation
     if (!password) {
-      newErrors.password = 'Authentication password is required.';
+      newErrors.password = 'Password is required.';
     }
 
     setErrors(newErrors);
@@ -65,11 +72,10 @@ export default function Login() {
     e.preventDefault();
     setErrors({});
     
-    // 1. Prevent action if currently rate-limited
     const currentLock = checkLockout(email);
     if (currentLock.isLocked) {
-      toast.error(`Authentication locked. Try again in ${currentLock.remainingSeconds}s.`);
-      addLog('AUTH', 'CRITICAL', 'Locked User Sign-in Blocked', `Locked user account [${email}] attempted to bypass lockout timer. Denied.`, email);
+      toast.error(`Too many attempts. Locked out for ${currentLock.remainingSeconds}s.`);
+      addLog('AUTH', 'CRITICAL', 'Locked User Sign-in Blocked', `Locked account [${email}] tried to log in.`, email);
       return;
     }
 
@@ -77,18 +83,18 @@ export default function Login() {
 
     setIsLoading(true);
 
-    // Defensive input scanning (detect SQLi attempts)
+    // SQLi Defense
     const sqlInjectionPattern = /('|--|#|\/\*|\*\/|union|select|insert|delete|drop|update)/gi;
     if (sqlInjectionPattern.test(email) || sqlInjectionPattern.test(password)) {
-      addLog('API', 'CRITICAL', 'SQL Injection Pattern Blocked', `Parametric injection string detected in authentication payload: Email=[${email}]`, email);
-      toast.error('Security alert: Restricted character sequence detected in inputs.');
+      addLog('API', 'CRITICAL', 'SQL Injection Pattern Blocked', `SQLi attempt blocked: [${email}]`, email);
+      toast.error('Invalid character sequence detected in inputs.');
       registerFailedLogin(email);
       setIsLoading(false);
       return;
     }
 
     try {
-      // A. Try real Supabase auth
+      // 1. Try real Supabase auth
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password: password
@@ -96,17 +102,21 @@ export default function Login() {
 
       if (!error && data?.user) {
         registerSuccessfulLogin(email.trim());
-        toast.success('Enterprise portal access authorized.');
+        
+        // Handle Remember Me
+        if (rememberMe) {
+          localStorage.setItem('remember_me_email', email.trim());
+        } else {
+          localStorage.removeItem('remember_me_email');
+        }
+
+        toast.success('Signed in successfully.');
         navigate(ROUTES.DASHBOARD);
         return;
       }
 
-      // B. Hardened fallback for local secure demo credentials
-      // Email: admin@enterprise.com | password: EnterpriseSecure123! (Admin role)
-      // Email: officer@enterprise.com | password: OfficerSecure123! (Officer role)
-      // Email: viewer@enterprise.com | password: ViewerSecure123! (Viewer role)
+      // 2. Demo accounts fallback
       const sanitizedEmail = email.trim().toLowerCase();
-      
       let matchedRole: 'admin' | 'officer' | 'viewer' | null = null;
       if (sanitizedEmail === 'admin@enterprise.com' && password === 'EnterpriseSecure123!') {
         matchedRole = 'admin';
@@ -117,250 +127,298 @@ export default function Login() {
       }
 
       if (matchedRole) {
-        // Authenticated successfully locally
         registerSuccessfulLogin(sanitizedEmail);
         useSecurityStore.getState().changeRole(matchedRole);
-        toast.success(`Access Authorized. Logged in as ${matchedRole.toUpperCase()}`);
+        
+        // Handle Remember Me
+        if (rememberMe) {
+          localStorage.setItem('remember_me_email', sanitizedEmail);
+        } else {
+          localStorage.removeItem('remember_me_email');
+        }
+
+        toast.success(`Welcome back. Logged in as ${matchedRole.toUpperCase()}`);
         navigate(ROUTES.DASHBOARD);
       } else {
-        // Auth failure
         const lockoutResult = registerFailedLogin(email.trim());
         if (lockoutResult.isLocked) {
-          toast.error(`Account locked out for 60 seconds due to repeated failed logins.`);
+          toast.error(`Too many failed logins. Your account is locked for 60 seconds.`);
         } else {
-          toast.error('Invalid credentials. Check your email and password.');
-          setErrors({ general: 'The credentials supplied do not match our secure access rules.' });
+          toast.error('Invalid email or password.');
+          setErrors({ general: 'The email or password you entered is incorrect.' });
         }
       }
     } catch (err: any) {
-      // Safe error handling: Do not disclose precise stack trace details
-      setErrors({ general: 'A secure gateway timeout occurred. System logs updated.' });
-      addLog('SYSTEM', 'CRITICAL', 'Authentication Gateway Exception', `Auth failure details: ${err?.message || err}`, email);
+      setErrors({ general: 'A connection error occurred. Please try again.' });
+      addLog('SYSTEM', 'CRITICAL', 'Authentication Exception', `${err?.message || err}`, email);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Secure Testing Shortcuts (No secrets exposed, strictly for interactive auditor testing)
-  const loadTestingPreset = (type: 'admin' | 'officer' | 'viewer' | 'invalid' | 'injection') => {
+  // Demo accounts helper
+  const loadTestingPreset = (type: 'admin' | 'officer' | 'viewer') => {
     setErrors({});
     if (type === 'admin') {
       setEmail('admin@enterprise.com');
       setPassword('EnterpriseSecure123!');
-      toast.info('Loaded valid admin credential preset.');
+      toast.info('Loaded administrator test account details.');
     } else if (type === 'officer') {
       setEmail('officer@enterprise.com');
       setPassword('OfficerSecure123!');
-      toast.info('Loaded valid officer credential preset.');
+      toast.info('Loaded compliance officer test account details.');
     } else if (type === 'viewer') {
       setEmail('viewer@enterprise.com');
       setPassword('ViewerSecure123!');
-      toast.info('Loaded valid viewer credential preset.');
-    } else if (type === 'invalid') {
-      setEmail('auditor@test.com');
-      setPassword('WrongPassword123!');
-      toast.warning('Loaded brute-force attack test vector.');
-    } else if (type === 'injection') {
-      setEmail("' OR '1'='1' --");
-      setPassword("' UNION SELECT NULL, NULL #");
-      toast.warning('Loaded SQL injection payload.');
+      toast.info('Loaded viewer test account details.');
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#fcfcfc] flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans selection:bg-[#111111]/10 relative overflow-hidden">
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-12 font-sans bg-white text-neutral-900 selection:bg-neutral-900/10">
       
-      {/* Decorative background blurs */}
-      <div className="absolute top-0 inset-x-0 h-[500px] bg-gradient-to-b from-[#111111]/5 to-transparent pointer-events-none" />
-      <div className="absolute -top-40 -right-40 w-96 h-96 bg-slate-100 rounded-full blur-3xl opacity-50 pointer-events-none" />
-      <div className="absolute top-20 -left-20 w-72 h-72 bg-slate-100 rounded-full blur-3xl opacity-50 pointer-events-none" />
+      {/* LEFT SPLIT COLUMN: Premium Brand Side Panel (Desktop only) */}
+      <div className="hidden lg:flex lg:col-span-5 bg-neutral-950 text-white flex-col justify-between p-16 relative overflow-hidden">
+        {/* Abstract background mesh */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f1f_1px,transparent_1px),linear-gradient(to_bottom,#1f1f1f_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-30 pointer-events-none" />
+        <div className="absolute top-[-20%] left-[-20%] w-[80%] h-[80%] bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-neutral-800/20 rounded-full blur-3xl pointer-events-none" />
 
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="sm:mx-auto sm:w-full sm:max-w-[460px] relative z-10"
-      >
-        <div className="flex flex-col items-center">
-          <motion.div 
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.2, type: "spring", stiffness: 300, damping: 20 }}
-            className="bg-[#111111] text-white p-3.5 rounded-2xl shadow-xl mb-6 relative"
-          >
-            <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent rounded-2xl pointer-events-none" />
-            <ShieldAlert className="h-8 w-8 relative z-10 text-emerald-400 animate-pulse" />
-          </motion.div>
-          <h2 className="text-center text-3xl font-extrabold tracking-tight text-[#111111] leading-tight font-sans">
-            Secure Entry Portal
-          </h2>
-          <p className="mt-2.5 text-center text-[14px] text-[#666666]">
-            Hardened access node for Compliance Audits
-          </p>
+        {/* Brand Header */}
+        <div className="flex items-center gap-3 relative z-10">
+          <div className="bg-white text-black p-2 rounded-xl flex items-center justify-center shadow-md">
+            <ShieldAlert className="h-6 w-6 text-neutral-900" />
+          </div>
+          <span className="text-xl font-bold tracking-tight">Compliance AI</span>
         </div>
 
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1, duration: 0.5 }}
-          className="mt-8"
-        >
-          <Card className="border-[#eaeaea] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.06)] rounded-[24px] overflow-hidden bg-white/90 backdrop-blur-xl">
-            <CardContent className="pt-8 px-8 pb-8 space-y-5">
-              
-              {/* Lockout Warning Card */}
-              <AnimatePresence>
-                {lockoutState.isLocked && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800"
-                  >
-                    <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-semibold">Brute-Force Lockout Engaged</p>
-                      <p className="text-xs text-red-600/90 mt-1">
-                        Sign-ins on this account are disabled for <span className="font-bold text-red-700 font-mono text-sm">{lockoutState.remainingSeconds}s</span> to prevent password cracking.
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-[#111111] uppercase tracking-wider">Corporate Email</label>
-                  <Input 
-                    type="text" 
-                    disabled={lockoutState.isLocked || isLoading}
-                    placeholder="admin@enterprise.com" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="h-12 bg-[#fafafa] border-[#eaeaea] focus-visible:ring-[#111111] rounded-xl font-medium"
-                  />
-                  {errors.email && (
-                    <p className="text-xs text-red-600 font-medium flex items-center gap-1 mt-1">
-                      <AlertTriangle className="h-3 w-3" /> {errors.email}
-                    </p>
-                  )}
-                </div>
-                
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-[#111111] uppercase tracking-wider">Access Token / Password</label>
-                    <Link to={ROUTES.AUTH.FORGOT_PASSWORD} className="text-xs font-semibold text-[#666666] hover:text-[#111111] transition-colors">
-                      Forgot?
-                    </Link>
-                  </div>
-                  <div className="relative">
-                    <Input 
-                      type={showPassword ? "text" : "password"} 
-                      disabled={lockoutState.isLocked || isLoading}
-                      placeholder="••••••••" 
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="h-12 bg-[#fafafa] border-[#eaeaea] focus-visible:ring-[#111111] rounded-xl pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#111111]"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  {errors.password && (
-                    <p className="text-xs text-red-600 font-medium flex items-center gap-1 mt-1">
-                      <AlertTriangle className="h-3 w-3" /> {errors.password}
-                    </p>
-                  )}
-                </div>
-
-                {errors.general && (
-                  <p className="text-xs text-red-600 font-semibold text-center mt-2 bg-red-50 p-2.5 rounded-lg border border-red-100">
-                    {errors.general}
-                  </p>
-                )}
-
-                <Button 
-                  type="submit"
-                  disabled={lockoutState.isLocked || isLoading}
-                  className="w-full h-12 text-[14px] font-bold mt-4 group rounded-xl bg-[#111111] text-white hover:bg-[#222222] transition-all duration-200 shadow-sm" 
-                  variant="default"
-                >
-                  {isLoading ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      Verify and Authenticate
-                      <ArrowRight className="ml-2 h-4 w-4 opacity-70 group-hover:translate-x-1 transition-transform" />
-                    </>
-                  )}
-                </Button>
-              </form>
-            </CardContent>
-            
-            <div className="px-8 py-5 bg-[#fafafa]/50 border-t border-[#eaeaea] text-center">
-              <p className="text-[14px] text-[#666666]">
-                New officer needing clearance?{' '}
-                <Link to={ROUTES.AUTH.REGISTER} className="font-bold text-[#111111] hover:underline">
-                  Submit Request
-                </Link>
-              </p>
+        {/* Marketing Value Prop */}
+        <div className="space-y-8 relative z-10 my-auto">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-full border border-emerald-500/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Enterprise Security Grade
             </div>
-          </Card>
-          
-          {/* Interactive Security Testing Panel for Auditors */}
-          <Card className="mt-6 border-dashed border border-emerald-200 bg-emerald-50/40 rounded-2xl overflow-hidden p-5">
-            <div className="flex items-start gap-2.5">
-              <Key className="h-4.5 w-4.5 text-emerald-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wide">Auditor Security testing Suite</h4>
-                <p className="text-[11px] text-emerald-700/90 mt-1">
-                  Inject standard attack vectors to witness defensive lockout rates, parametric query protections, and logging events live.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button 
-                    onClick={() => loadTestingPreset('admin')}
-                    className="text-[11px] font-semibold px-2.5 py-1 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-                  >
-                    Autofill Admin
-                  </button>
-                  <button 
-                    onClick={() => loadTestingPreset('officer')}
-                    className="text-[11px] font-semibold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg hover:bg-emerald-200 transition-colors border border-emerald-200"
-                  >
-                    Autofill Officer
-                  </button>
-                  <button 
-                    onClick={() => loadTestingPreset('viewer')}
-                    className="text-[11px] font-semibold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg hover:bg-emerald-200 transition-colors border border-emerald-200"
-                  >
-                    Autofill Viewer
-                  </button>
-                  <button 
-                    onClick={() => loadTestingPreset('invalid')}
-                    className="text-[11px] font-semibold px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 transition-colors border border-amber-200"
-                  >
-                    Brute Force Guess
-                  </button>
-                  <button 
-                    onClick={() => loadTestingPreset('injection')}
-                    className="text-[11px] font-semibold px-2.5 py-1 bg-red-100 text-red-800 rounded-lg hover:bg-red-200 transition-colors border border-red-200"
-                  >
-                    SQL Injection Payload
-                  </button>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          <div className="mt-6 text-center text-[12px] text-[#888888] flex flex-col items-center">
-            <p className="flex items-center gap-1.5"><ShieldAlert className="h-3.5 w-3.5" /> Enforced by OWASP ASVS v4.0 Authentication Guidelines.</p>
+            <h1 className="text-4xl font-extrabold tracking-tight leading-tight max-w-md">
+              Trust & Transparency, Automated.
+            </h1>
+            <p className="text-neutral-400 text-[14px] leading-relaxed max-w-sm">
+              Register business entities, verify regulatory credentials, and monitor company compliance scores in real time.
+            </p>
           </div>
-        </motion.div>
-      </motion.div>
+
+          {/* Core Metrics */}
+          <div className="grid grid-cols-2 gap-6 pt-6 border-t border-neutral-800 max-w-sm">
+            <div>
+              <h4 className="text-3xl font-extrabold text-white">10x</h4>
+              <p className="text-xs text-neutral-400 mt-1">Faster Document Reviews</p>
+            </div>
+            <div>
+              <h4 className="text-3xl font-bold text-white">100%</h4>
+              <p className="text-xs text-neutral-400 mt-1">Real-time Risk Reports</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Trust Footer */}
+        <div className="text-xs text-neutral-500 relative z-10 flex items-center gap-4">
+          <span>Certified SOC2 Type II</span>
+          <span>•</span>
+          <span>ISO 27001 Enforced</span>
+        </div>
+      </div>
+
+      {/* RIGHT SPLIT COLUMN: Aligned Form Panel */}
+      <div className="lg:col-span-7 flex flex-col justify-center items-center p-6 sm:p-12 md:p-20 bg-neutral-50/50">
+        
+        {/* Content Container (Perfect vertical & horizontal centering) */}
+        <div className="w-full max-w-[440px] space-y-8 bg-white p-8 sm:p-10 rounded-2xl border border-neutral-200/80 shadow-sm">
+          
+          {/* Header */}
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold tracking-tight text-neutral-900">
+              Sign In
+            </h2>
+            <p className="text-sm text-neutral-500">
+              Welcome back. Enter your account details below.
+            </p>
+          </div>
+
+          {/* Lockout banner */}
+          <AnimatePresence>
+            {lockoutState.isLocked && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800"
+              >
+                <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider">Too Many Attempts</p>
+                  <p className="text-xs text-red-700/90 mt-1">
+                    Sign-ins are temporarily disabled. Please wait <span className="font-bold text-red-800 font-mono text-sm">{lockoutState.remainingSeconds}s</span> before retrying.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Form */}
+          <form onSubmit={handleLogin} className="space-y-4">
+            
+            {/* Email field */}
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+                Email Address
+              </label>
+              <Input 
+                id="email"
+                type="email" 
+                disabled={lockoutState.isLocked || isLoading}
+                placeholder="you@company.com" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="h-11 bg-neutral-50/50 border-neutral-200 focus-visible:ring-neutral-900 rounded-xl font-medium placeholder-neutral-400"
+                aria-required="true"
+              />
+              {errors.email && (
+                <p className="text-xs text-red-600 font-medium flex items-center gap-1 mt-1">
+                  <AlertTriangle className="h-3 w-3" /> {errors.email}
+                </p>
+              )}
+            </div>
+            
+            {/* Password field */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="password" className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+                  Password
+                </label>
+              </div>
+              <div className="relative">
+                <Input 
+                  id="password"
+                  type={showPassword ? "text" : "password"} 
+                  disabled={lockoutState.isLocked || isLoading}
+                  placeholder="••••••••••••" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-11 bg-neutral-50/50 border-neutral-200 focus-visible:ring-neutral-900 rounded-xl pr-10 placeholder-neutral-400"
+                  aria-required="true"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 transition-colors focus:outline-none"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {errors.password && (
+                <p className="text-xs text-red-600 font-medium flex items-center gap-1 mt-1">
+                  <AlertTriangle className="h-3 w-3" /> {errors.password}
+                </p>
+              )}
+            </div>
+
+            {/* Remember me & Forgot password */}
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-2">
+                <input 
+                  type="checkbox" 
+                  id="rememberMe"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 focus:ring-offset-0 cursor-pointer"
+                />
+                <label htmlFor="rememberMe" className="text-xs font-semibold text-neutral-600 select-none cursor-pointer hover:text-neutral-900 transition-colors">
+                  Remember me
+                </label>
+              </div>
+              <Link to={ROUTES.AUTH.FORGOT_PASSWORD} className="text-xs font-semibold text-neutral-500 hover:text-neutral-900 transition-colors">
+                Forgot Password?
+              </Link>
+            </div>
+
+            {/* General validation error */}
+            {errors.general && (
+              <p className="text-xs text-red-600 font-semibold text-center mt-2 bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2 justify-center">
+                <AlertTriangle className="h-4 w-4 text-red-500" /> {errors.general}
+              </p>
+            )}
+
+            {/* Submit Button */}
+            <Button 
+              type="submit"
+              disabled={lockoutState.isLocked || isLoading}
+              className="w-full h-11 text-[14px] font-bold mt-4 group rounded-xl bg-neutral-900 text-white hover:bg-neutral-850 transition-all duration-200 shadow-sm" 
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  Sign In
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </span>
+              )}
+            </Button>
+          </form>
+
+          {/* Redirect link */}
+          <div className="text-center pt-2">
+            <p className="text-xs text-neutral-500">
+              Don't have an account?{' '}
+              <Link to={ROUTES.AUTH.REGISTER} className="font-bold text-neutral-900 hover:underline">
+                Sign Up
+              </Link>
+            </p>
+          </div>
+
+          <div className="h-px bg-neutral-100" />
+
+          {/* Test account selector - streamlined & beautiful */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Key className="h-4 w-4 text-neutral-400" />
+              <h4 className="text-xs font-bold text-neutral-700 uppercase tracking-wide">Sandbox Accounts</h4>
+            </div>
+            <p className="text-[11px] text-neutral-400">
+              Instantly log in using preconfigured workspace permissions:
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button 
+                type="button"
+                onClick={() => loadTestingPreset('admin')}
+                className="text-[11px] font-semibold py-2 px-1 border border-neutral-200 rounded-lg hover:bg-neutral-50 hover:border-neutral-300 transition-all text-center"
+              >
+                Admin
+              </button>
+              <button 
+                type="button"
+                onClick={() => loadTestingPreset('officer')}
+                className="text-[11px] font-semibold py-2 px-1 border border-neutral-200 rounded-lg hover:bg-neutral-50 hover:border-neutral-300 transition-all text-center"
+              >
+                Officer
+              </button>
+              <button 
+                type="button"
+                onClick={() => loadTestingPreset('viewer')}
+                className="text-[11px] font-semibold py-2 px-1 border border-neutral-200 rounded-lg hover:bg-neutral-50 hover:border-neutral-300 transition-all text-center"
+              >
+                Viewer
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Small footer */}
+        <p className="mt-8 text-xs text-neutral-400">
+          Enforced by enterprise access control guidelines.
+        </p>
+      </div>
     </div>
   );
 }

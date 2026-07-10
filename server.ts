@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import crypto from 'crypto';
+import { GoogleGenAI, Type } from '@google/genai';
 import { runSelfProvisioning } from './src/db/self-provision';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,6 +110,109 @@ async function startServer() {
   // 3. API Endpoints
   app.get('/api/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+  });
+
+  // AI-powered onboarding extraction route using Google GenAI SDK
+  app.post('/api/onboarding/extract', apiRateLimiter(20, 60 * 1000), async (req, res) => {
+    try {
+      const { fileBase64, mimeType, fileName } = req.body;
+
+      if (!fileBase64 || !mimeType) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: 'Missing required file data or mimeType for extraction.'
+        });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({
+          success: false,
+          error: 'Configuration Error',
+          message: 'GEMINI_API_KEY is not configured on the server.'
+        });
+      }
+
+      // Initialize Google GenAI
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      // Format clean base64 data (strip prefix if exists)
+      const base64Data = fileBase64.includes('base64,') 
+        ? fileBase64.split('base64,')[1] 
+        : fileBase64;
+
+      const filePart = {
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      };
+
+      const promptPart = {
+        text: `Analyze this uploaded document (which is a business document like a GST certificate, incorporation certificate, PAN, or invoice).
+        Extract or infer the following details with 100% accuracy. Do NOT invent or hallucinate any numbers or information.
+        If a field is completely missing, return null for that field.
+
+        Specifically extract:
+        1. Legal/Trade Business Name
+        2. GSTIN (15-digit Goods and Services Tax Identification Number)
+        3. PAN (10-digit Permanent Account Number, often embedded in the GSTIN at chars 3-12)
+        4. Principal Address
+        5. State
+        6. Date of Registration (YYYY-MM-DD format)
+        7. Business Type (Sole Proprietor, Partnership, Private Limited, etc.)
+        8. Industry / Business Activity (Retail, IT Services, Manufacturing, etc.)`
+      };
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: [filePart, promptPart],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              businessName: { type: Type.STRING, description: 'Legal or trade name of the business' },
+              gstin: { type: Type.STRING, description: '15-character GSTIN' },
+              pan: { type: Type.STRING, description: '10-character PAN' },
+              address: { type: Type.STRING, description: 'Complete business address' },
+              state: { type: Type.STRING, description: 'Registration state' },
+              registrationDate: { type: Type.STRING, description: 'Registration date in YYYY-MM-DD format' },
+              businessType: { type: Type.STRING, description: 'Type of business entity' },
+              industry: { type: Type.STRING, description: 'Industry sector or primary business activity' }
+            },
+            required: ['businessName']
+          }
+        }
+      });
+
+      const text = response.text;
+      if (!text) {
+        throw new Error('Empty response from Gemini API');
+      }
+
+      const extractedData = JSON.parse(text.trim());
+      res.json({
+        success: true,
+        data: extractedData
+      });
+
+    } catch (err: any) {
+      console.error('[AI EXTRACTION ERROR]', err);
+      res.status(500).json({
+        success: false,
+        error: 'Extraction Failed',
+        message: err.message || 'An error occurred while using AI to extract business registration details.'
+      });
+    }
   });
 
   // Server-side binary validation and magic-bytes inspection for secure uploads

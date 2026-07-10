@@ -1,6 +1,6 @@
 export const TRANSLATIONS = {
   en: {
-    dashboard: "Dashboard",
+    dashboard: "Business Overview",
     businesses: "Businesses",
     documents: "Documents",
     reports: "Reports",
@@ -10,7 +10,7 @@ export const TRANSLATIONS = {
     security_center: "Security Center",
     settings: "Settings",
     help_center: "Help Center",
-    command_center: "Command Center",
+    command_center: "Business Overview",
     clearance_active: "Active Security clearance:",
     registered_entities: "Registered Entities",
     awaiting_verification: "Awaiting Verification",
